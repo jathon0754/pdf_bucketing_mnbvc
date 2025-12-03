@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Author: Jathon
 # Date: 2025/12/02
-# Description: 极致高性能 PDF 处理器（进程池 + CSV 写线程 + 批量处理）每秒270
+# Description: 极致高性能 PDF 处理器（进程池 + 异步 I/O + CSV 写线程）
 
 import os
 import csv
@@ -12,20 +12,21 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from queue import Queue
 from threading import Thread
+from queue import Queue
+import asyncio
 
 # ----------------- 配置 -----------------
 PAGE_COUNT_THRESHOLD = 100
 FILE_SIZE_THRESHOLD_BYTES = 10 * 1024 * 1024  # 10MB
 BATCH_WRITE_SIZE = 200  # 每批写入 CSV
-CSV_QUEUE_MAXSIZE = 1000  # CSV 队列最大长度
+CSV_QUEUE_MAXSIZE = 2000
 # ---------------------------------------
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.FileHandler('out/v6/pdf_processor.log', encoding='utf-8'), logging.StreamHandler()]
+    handlers=[logging.FileHandler('../out/v6/pdf_processor.log', encoding='utf-8'), logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,7 @@ def csv_writer_thread(csv_file, queue: Queue):
             queue.task_done()
 
 
-def process_pdfs(root_path, csv_file="pdf_analysis.csv", workers=None, resume=True):
+async def async_process_pdfs(root_path, csv_file="pdf_analysis.csv", workers=None, resume=True):
     workers = workers or (os.cpu_count() or 4)
     processed = set()
     if resume:
@@ -154,69 +155,52 @@ def process_pdfs(root_path, csv_file="pdf_analysis.csv", workers=None, resume=Tr
         "start": datetime.now()
     }
 
-    # CSV 写入队列
     csv_queue = Queue(maxsize=CSV_QUEUE_MAXSIZE)
     writer_thread = Thread(target=csv_writer_thread, args=(csv_file, csv_queue), daemon=True)
     writer_thread.start()
 
-    batch_rows = []
+    loop = asyncio.get_event_loop()
+    executor = ProcessPoolExecutor(max_workers=workers)
 
     pdf_gen = (p for p in find_pdf_files(root_path) if os.path.normcase(p) not in processed)
+    batch_rows = []
 
-    with ProcessPoolExecutor(max_workers=workers) as executor:
-        future_to_path = {}
-        batch_size = workers * 10
+    async def process_pdf(pdf_path):
+        return await loop.run_in_executor(executor, process_single_pdf, pdf_path)
 
-        # 批量提交任务
-        pdf_batch = []
-        for pdf in pdf_gen:
-            pdf_batch.append(pdf)
-            if len(pdf_batch) >= batch_size:
-                for p in pdf_batch:
-                    future_to_path[executor.submit(process_single_pdf, p)] = p
-                pdf_batch = []
+    tasks = set()
+    async for pdf_path in async_stream(pdf_gen):
+        tasks.add(asyncio.create_task(process_pdf(pdf_path)))
+        if len(tasks) >= workers * 5:
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for d in done:
+                res = d.result()
+                batch_rows.append(res)
+                stats["processed"] += 1
+                stats["category_counts"].setdefault(res['category'], 0)
+                stats["category_counts"][res['category']] += 1
+                if len(batch_rows) >= BATCH_WRITE_SIZE:
+                    csv_queue.put(batch_rows.copy())
+                    batch_rows.clear()
+            tasks = pending
 
-                for future in as_completed(future_to_path):
-                    res = future.result()
-                    batch_rows.append(res)
-                    stats["processed"] += 1
-                    stats["category_counts"].setdefault(res['category'], 0)
-                    stats["category_counts"][res['category']] += 1
-
-                    if len(batch_rows) >= BATCH_WRITE_SIZE:
-                        csv_queue.put(batch_rows.copy())
-                        batch_rows.clear()
-
-                    if stats["processed"] % 100 == 0:
-                        elapsed = (datetime.now() - stats["start"]).total_seconds()
-                        speed = stats["processed"] / elapsed if elapsed > 0 else 0
-                        logger.info(f"已处理 {stats['processed']} 个文件；速率 {speed:.1f} file/s")
-
-                future_to_path.clear()
-
-        for p in pdf_batch:
-            future_to_path[executor.submit(process_single_pdf, p)] = p
-
-        for future in as_completed(future_to_path):
-            res = future.result()
+    # 等待剩余任务
+    if tasks:
+        done, _ = await asyncio.wait(tasks)
+        for d in done:
+            res = d.result()
             batch_rows.append(res)
             stats["processed"] += 1
             stats["category_counts"].setdefault(res['category'], 0)
             stats["category_counts"][res['category']] += 1
-            if len(batch_rows) >= BATCH_WRITE_SIZE:
-                csv_queue.put(batch_rows.copy())
-                batch_rows.clear()
 
-        # 写入剩余数据
-        if batch_rows:
-            csv_queue.put(batch_rows.copy())
-            batch_rows.clear()
+    if batch_rows:
+        csv_queue.put(batch_rows.copy())
+        batch_rows.clear()
 
-    # 通知 CSV 线程结束
     csv_queue.put(None)
     writer_thread.join()
 
-    # 输出最终统计
     total_time = (datetime.now() - stats["start"]).total_seconds()
     logger.info("=" * 50)
     logger.info(f"处理完成！总文件数: {stats['processed']}")
@@ -228,16 +212,22 @@ def process_pdfs(root_path, csv_file="pdf_analysis.csv", workers=None, resume=Tr
     logger.info("=" * 50)
 
 
+async def async_stream(gen):
+    for item in gen:
+        yield item
+
+
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="极致高性能 PDF 扫描器")
+    parser = argparse.ArgumentParser(description="极致高性能 PDF 扫描器 (进程池+异步)")
     parser.add_argument("root_path", help="PDF 根目录")
     parser.add_argument("--output", "-o", default="pdf_analysis.csv")
-    parser.add_argument("--workers", "-w", type=int, help="进程数，默认 CPU 核心数")
-    parser.add_argument("--no-resume", action="store_true", help="不加载已有 CSV，重新开始")
+    parser.add_argument("--workers", "-w", type=int, help="进程数")
+    parser.add_argument("--no-resume", action="store_true", help="不加载已有 CSV")
     args = parser.parse_args()
 
-    process_pdfs(args.root_path, csv_file=args.output, workers=args.workers, resume=not args.no_resume)
+    asyncio.run(async_process_pdfs(args.root_path, csv_file=args.output,
+                                   workers=args.workers, resume=not args.no_resume))
 
 
 if __name__ == "__main__":

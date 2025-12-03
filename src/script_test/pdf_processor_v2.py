@@ -22,7 +22,7 @@ BATCH_WRITE_SIZE = 200  # 每批处理多少文件写一次 CSV
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.FileHandler('out/v6/pdf_processor.log', encoding='utf-8'), logging.StreamHandler()]
+    handlers=[logging.FileHandler('../out/v6/pdf_processor.log', encoding='utf-8'), logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 

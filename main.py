@@ -1,5 +1,5 @@
 def main():
-    print("Hello from pdf-processor!")
+    print("Hello from pdf-classification!")
 
 
 if __name__ == "__main__":

@@ -5,7 +5,12 @@ build/
 dist/
 wheels/
 *.egg-info
-pdf_test/
+src/gen_pdf/pdf_test/
+src/out/
+src/script_test/
 
 # Virtual environments
 .venv
+
+*.log
+*.csv

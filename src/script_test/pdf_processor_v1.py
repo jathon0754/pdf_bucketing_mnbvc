@@ -24,7 +24,7 @@ def setup_logger():
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[logging.FileHandler('out/v6/pdf_processor.log', encoding='utf-8'),
+        handlers=[logging.FileHandler('../out/v6/pdf_processor.log', encoding='utf-8'),
                   logging.StreamHandler()]
     )
     return logging.getLogger(__name__)
