@@ -5,12 +5,17 @@ build/
 dist/
 wheels/
 *.egg-info
+
+# 项目输出目录
 src/gen_pdf/pdf_test/
 src/out/
 src/script_test/
 
 # Virtual environments
-.venv
+.venv/
 
+# 日志文件
 *.log
+
+# CSV 文件
 *.csv

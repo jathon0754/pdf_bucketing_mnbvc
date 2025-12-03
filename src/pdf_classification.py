@@ -16,8 +16,8 @@ from queue import Queue
 import time
 
 # ----------------- 配置 -----------------
-LOG_FILE_PATH = './pdf_processor.log'
-DEFAULT_CSV_FILE = './pdf_analysis.csv'
+LOG_FILE_PATH = './pdf_classification.log'
+DEFAULT_CSV_FILE = './pdf_classification.csv'
 
 PAGE_COUNT_THRESHOLD = 100  # 页数阈值
 FILE_SIZE_THRESHOLD_BYTES = 10 * 1024 * 1024    # 文件大小阈值
@@ -149,7 +149,9 @@ def process_pdfs(root_path, csv_file=DEFAULT_CSV_FILE, workers=None, resume=True
 
     with ProcessPoolExecutor(max_workers=workers) as executor:
         futures = {executor.submit(process_single_pdf, p): p for p in pdf_gen}
+
         last_time = time.time()
+        last_count = 0  # 用于瞬时速率计算
 
         for fut in as_completed(futures):
             res = fut.result()
@@ -164,9 +166,20 @@ def process_pdfs(root_path, csv_file=DEFAULT_CSV_FILE, workers=None, resume=True
 
             now = time.time()
             if now - last_time >= PROGRESS_INTERVAL:
-                elapsed = (now - stats["start"].timestamp())
-                speed = stats["processed"] / elapsed if elapsed > 0 else 0
-                logger.info(f"已处理 {stats['processed']} 个文件，速率 {speed:.1f} 文件/秒")
+                # 平均速率
+                elapsed_total = (now - stats["start"].timestamp())
+                avg_speed = stats["processed"] / elapsed_total if elapsed_total > 0 else 0
+                # 瞬时速率
+                interval_count = stats["processed"] - last_count
+                interval_speed = interval_count / (now - last_time)
+
+                logger.info(
+                    f"已处理 {stats['processed']} 个文件，"
+                    f"平均速率 {avg_speed:.1f} 文件/秒，"
+                    f"瞬时速率 {interval_speed:.1f} 文件/秒"
+                )
+
+                last_count = stats["processed"]
                 last_time = now
 
     if batch_rows:
