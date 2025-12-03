@@ -1,12 +1,8 @@
 # -*- coding: utf-8 -*-
 # Author: Jathon
 # Date: 2025/12/2
-# Description: XiXi.
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-# gen_many_pdfs_linux.py
-# 批量生成大量 PDF，每个 PDF 可多页，支持分目录、并发、进度显示
-# Author: Jathon
+# Description: 批量生成大量 PDF，每个 PDF 可多页，支持分目录、并发、进度显示
+
 
 import os
 from pathlib import Path
@@ -96,14 +92,14 @@ def load_progress(progress_file):
 def main():
     parser = argparse.ArgumentParser(description="批量生成多页 PDF")
     parser.add_argument("out_dir", help="输出根目录")
-    parser.add_argument("--total", type=int, default=1000000, help="总文件数")
+    parser.add_argument("--total", type=int, default=100000, help="总文件数")
     parser.add_argument("--workers", "-w", type=int, default=os.cpu_count(), help="并发进程数")
     parser.add_argument("--files-per-dir", type=int, default=1000, help="每个子目录的文件数")
     parser.add_argument("--prefix", type=str, default="page_", help="文件名前缀")
     parser.add_argument("--padding", type=int, default=7, help="编号零填充宽度")
     parser.add_argument("--chunk-size", type=int, default=1000, help="每个任务块包含文件数")
     parser.add_argument("--min-pages", type=int, default=1, help="每个 PDF 最少页数")
-    parser.add_argument("--max-pages", type=int, default=10, help="每个 PDF 最大页数")
+    parser.add_argument("--max-pages", type=int, default=1000, help="每个 PDF 最大页数")
     parser.add_argument("--fontsize", type=int, default=48, help="页码字体大小")
     parser.add_argument("--resume", action="store_true", help="断点续生成")
     args = parser.parse_args()
